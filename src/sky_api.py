@@ -4,8 +4,9 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict
 from configparser import ConfigParser
+from typing import Dict, List
+
 import requests
 
 
@@ -62,7 +63,6 @@ class OpenSkyAircraftClient(BaseAircraftClient):
             "lomax": bounds["max_lon"],
         }
 
-
         response = requests.get(self.base_url, auth=self.auth, params=params)
         result_data = response.json()
 
@@ -75,16 +75,18 @@ class OpenSkyAircraftClient(BaseAircraftClient):
         for state in result_data["states"]:
             if state is None:
                 continue
-            aircraft_list.append({
-                "id_number": state[0],
-                "callsign": state[1].strip() if state[1] else None,
-                "country": state[2].strip() if state[2] else None,
-                "latitude": state[6],
-                "longitude": state[5],
-                "altitude": state[13],
-                "velocity": state[9],
-                "on_ground": state[8],
-            })
+            aircraft_list.append(
+                {
+                    "icao24": state[0],
+                    "callsign": state[1].strip() if state[1] else None,
+                    "country": state[2].strip() if state[2] else None,
+                    "latitude": state[6],
+                    "longitude": state[5],
+                    "altitude": state[13],
+                    "velocity": state[9],
+                    "on_ground": state[8],
+                }
+            )
 
         return aircraft_list
 
@@ -130,8 +132,8 @@ if __name__ == "__main__":
 
     # Выведем первые 3 самолёта для проверки структуры.
     for i, ac in enumerate(aircraft_list[:3]):
-        print(f"\nСамолёт {i+1}:")
-        print(f"  id_number:   {ac['id_number']}")
+        print(f"\nСамолёт {i + 1}:")
+        print(f"  icao24:      {ac['icao24']}")
         print(f"  callsign:    {ac['callsign']}")
         print(f"  country:     {ac['country']}")
         print(f"  latitude:    {ac['latitude']}")

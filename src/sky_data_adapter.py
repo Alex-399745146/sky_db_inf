@@ -6,6 +6,8 @@
 - класс OpenSkyAircraftClient
 """
 
+from typing import Any, Dict, List, Optional
+
 from src.geocoder import NominatimGeocoder
 from src.sky_api import OpenSkyAircraftClient
 
@@ -22,14 +24,11 @@ class SkyDataAdapter:
             config_path (str): путь к INI‑конфигу.
         """
         self.geocoder = NominatimGeocoder(config_path)
-        self.sky_client = OpenSkyAircraftClient(
-            username="YOUR_OPENSKY_USER",  # <-- замени
-            password="YOUR_OPENSKY_PASS",  # <-- замени
-        )
-        self._aeroplanes = None
+        self.sky_client = OpenSkyAircraftClient(username="User-Agent", password="test-app/1.0")
+        self._aeroplanes: Optional[List[Dict[str, Any]]] = None
 
     @property
-    def aeroplanes(self) -> dict | None:
+    def aeroplanes(self) -> Optional[List[Dict[str, Any]]]:
         """
         Возвращает последний полученный ответ от OpenSky в формате dict.
         Может быть None, если последний запрос был неудачным.

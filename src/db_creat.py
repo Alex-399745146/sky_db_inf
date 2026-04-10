@@ -4,9 +4,7 @@
 сделано на чистых функциях так проще и понятнее.
 """
 
-
 import psycopg2
-
 
 
 def get_re_create_db(
@@ -15,7 +13,7 @@ def get_re_create_db(
     password: str,
     host: str = "localhost",
     port: int = 5432,
-):
+) -> None:
     """
     Создаёт/пересоздаёт БД PostgreSQL (удаляет старую, создаёт новую).
     """
@@ -44,7 +42,7 @@ def create_tables_db(
     password: str,
     host: str = "localhost",
     port: int = 5432,
-):
+) -> None:
     """
     Создаёт таблицы в БД db_sky по (3NF).
     """
@@ -70,7 +68,7 @@ def create_tables_db(
     cur.execute("""
         CREATE TABLE IF NOT EXISTS aircraft_countries (
             country_id SERIAL PRIMARY KEY,
-            country_code VARCHAR(10) NOT NULL UNIQUE
+            country_code VARCHAR(100) NOT NULL UNIQUE
         );
     """)
 
@@ -78,7 +76,7 @@ def create_tables_db(
     cur.execute("""
         CREATE TABLE IF NOT EXISTS aircraft (
             aircraft_id SERIAL PRIMARY KEY,
-            fly_code VARCHAR(6) NOT NULL UNIQUE,
+            icao24 VARCHAR(6) NOT NULL UNIQUE,
             callsign VARCHAR(16),
             latitude REAL,
             longitude REAL,

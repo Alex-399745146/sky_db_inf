@@ -4,13 +4,15 @@
 Так он остаётся автономным.
 """
 
-
 from abc import ABC, abstractmethod
-from configparser import ConfigParser
+from configparser import ConfigParser  # пока не используется, но пусть будет
+from typing import Any, Dict, Union
+
 import requests
 
+ParamsValue = Union[str, int, float]
 
-# Абстрактный класс
+
 class BaseGeocoder(ABC):
     """
     Абстрактный класс для получения координат страны из внешнего API.
@@ -18,21 +20,14 @@ class BaseGeocoder(ABC):
     """
 
     @abstractmethod
-    def get_country_bounds(self, country_name: str) -> dict:
+    def get_country_bounds(self, country_name: str) -> Dict[str, float]:
         """
         Для заданной страны возвращает границы (bounding box)
         в виде dict с ключами: min_lat, max_lat, min_lon, max_lon.
-
-        Args:
-            country_name (str): название страны.
-
-        Returns:
-            dict: словарь с координатами границ.
         """
         raise NotImplementedError
 
 
-# Дочерний класс
 class NominatimGeocoder(BaseGeocoder):
     """
     Реализация геокодера через Nominatim (nominatim.openstreetmap.org).
@@ -40,48 +35,28 @@ class NominatimGeocoder(BaseGeocoder):
     работает автономно (принимает строку с названием страны).
     """
 
-    def __init__(self, config_path: str = "config/config.ini"):
-        """
-        Args:
-            config_path (str): путь к INI‑файлу.
-        """
+    def __init__(self, config_path: str = "config/config.ini") -> None:
         self.config_path = config_path
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "KURSOVAYA_3/1.0"})
 
-    def get_country_bounds(self, country_name: str) -> dict:
+    def get_country_bounds(self, country_name: str) -> Dict[str, float]:
         """
         Запрашивает у Nominatim границы страны и возвращает как dict.
-
-        Example:
-            {
-                "min_lat": 41.19,
-                "max_lat": 81.86,
-                "min_lon": 19.61,
-                "max_lon": -169.01
-            }
-
-        Args:
-            country_name (str): название страны.
-
-        Returns:
-            dict: координаты geo_box (min_lat, max_lat, min_lon, max_lon).
         """
         url = "https://nominatim.openstreetmap.org/search"
-        params = {
+        params: Dict[str, ParamsValue] = {
             "country": country_name,
             "format": "json",
             "polygon_geojson": 0,  # не нужен geojson
         }
 
         response = self.session.get(url, params=params)
-        result_data = response.json()
+        result_data: Any = response.json()
 
-        # Берем первый результат (основная страна)
         if not result_data:
             raise ValueError(f"Country '{country_name}' not found in Nominatim.")
 
-        # Geo box(точки координат): [min_lat, max_lat, min_lon, max_lon]
         geo_box = result_data[0]["boundingbox"]
         return {
             "min_lat": float(geo_box[0]),

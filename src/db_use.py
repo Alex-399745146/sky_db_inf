@@ -1,127 +1,225 @@
 # src/db_use.py
-"""Управление и работа с уже созданной БД"""
 
+from typing import Any, Dict, List, Optional
 
-import configparser
 import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 
-class DatabaseManager:
-    """
-    Класс для управления БД PostgreSQL:
-    - проверка существования БД,
-    - удаление старой версии,
-    - создание новой БД,
-    - создание таблиц в 3NF.
-    """
-
-    def __init__(self, config_path: str = "config/config.ini"):
-        """
-        Args:
-            config_path (str): путь к INI‑файлу с настройками БД.
-        """
-        self.config_path = config_path
-        self._config = self._read_config()
-        self._conn_params = {
-            "user": self._config["db"]["user"],
-            "password": self._config["db"]["password"],
-            "host": self._config["db"]["host"],
-            "port": self._config["db"]["port"],
-        }
-
-    def _read_config(self) -> configparser.ConfigParser:
-        """Читает конфиг‑файл и возвращает ConfigParser."""
-        config = configparser.ConfigParser()
-        config.read(self.config_path)
-        return config
-
-    def _connect_to_postgres(self):
-        """
-        Подключается к экземпляру PostgreSQL (без выбора БД).
-        """
-        return psycopg2.connect(**self._conn_params)
-
-    def drop_and_create_db(self):
-        """
-        Проверяет существование БД db_sky_list,
-        при наличии удаляет её и создаёт заново.
-        """
-        conn = self._connect_to_postgres()
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cur = conn.cursor()
-
-        dbname = self._config["db"]["dbname"]
-
-        # Удаляем БД, если существует
-        cur.execute(f"DROP DATABASE IF EXISTS {dbname};")
-
-        # Создаём БД
-        cur.execute(f"CREATE DATABASE {dbname};")
-        print(f"Database {dbname} created.")
-
-        cur.close()
-        conn.close()
-
-    def create_tables(self):
-        """
-        Создаёт таблицы в БД db_sky_list:
-        - countries (страны),
-        - aircraft (самолёты),
-        - aircraft_countries (страна регистрации самолёта).
-
-        Структура приведена до 3NF.
-        """
-        conn = psycopg2.connect(
-            dbname=self._config["db"]["dbname"],
-            **self._conn_params
+class DBManager:
+    def __init__(self, dbname: str, user: str, password: str, host: str = "localhost", port: int = 5432):
+        self.conn = psycopg2.connect(
+            dbname=dbname,
+            user=user,
+            password=password,
+            host=host,
+            port=port,
         )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cur = conn.cursor()
+        self.conn.autocommit = True
 
-        # Таблица стран
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS countries (
-                country_id SERIAL PRIMARY KEY,
-                country_name VARCHAR(100) NOT NULL UNIQUE
-            );
-        """)
+    # ---------- МЕТОДЫ ВСТАВКИ ДАННЫХ ----------
 
-        # Таблица стран регистрации самолётов
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS aircraft_countries (
-                country_id SERIAL PRIMARY KEY,
-                country_code VARCHAR(10) NOT NULL UNIQUE
-            );
-        """)
-
-        # Таблица самолётов
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS aircraft (
-                aircraft_id SERIAL PRIMARY KEY,
-                icao24 VARCHAR(6) NOT NULL UNIQUE,
-                callsign VARCHAR(16),
-                latitude REAL,
-                longitude REAL,
-                altitude REAL,
-                velocity REAL,
-                on_ground BOOLEAN,
-                country_id INTEGER REFERENCES aircraft_countries(country_id),
-                observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Связь самолёта с страной исследования (по координатам)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS flight_observations (
-                observation_id SERIAL PRIMARY KEY,
-                aircraft_id INTEGER REFERENCES aircraft(aircraft_id),
-                country_id INTEGER REFERENCES countries(country_id),
-                observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        print("Tables created in 3NF.")
-
+    def clear_all(self) -> None:
+        cur = self.conn.cursor()
+        cur.execute("TRUNCATE flight_observations RESTART IDENTITY CASCADE;")
+        cur.execute("TRUNCATE aircraft RESTART IDENTITY CASCADE;")
+        cur.execute("TRUNCATE aircraft_countries RESTART IDENTITY CASCADE;")
+        cur.execute("TRUNCATE countries RESTART IDENTITY CASCADE;")
         cur.close()
-        conn.close()
+
+    def ensure_country(self, country_name: str) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT country_id FROM countries WHERE country_name = %s;", (country_name,))
+        row = cur.fetchone()
+        if row is not None:
+            country_id: int = int(row[0])
+            cur.close()
+            return country_id
+        cur.execute(
+            "INSERT INTO countries (country_name) VALUES (%s) RETURNING country_id;",
+            (country_name,),
+        )
+        new_row = cur.fetchone()
+        assert new_row is not None
+        new_id: int = int(new_row[0])
+        cur.close()
+        return new_id
+
+    def ensure_aircraft_country(self, country_code: Optional[str]) -> Optional[int]:
+        if country_code is None:
+            return None
+        cur = self.conn.cursor()
+        cur.execute("SELECT country_id FROM aircraft_countries WHERE country_code = %s;", (country_code,))
+        row = cur.fetchone()
+        if row is not None:
+            country_id: int = int(row[0])
+            cur.close()
+            return country_id
+        cur.execute(
+            "INSERT INTO aircraft_countries (country_code) VALUES (%s) RETURNING country_id;",
+            (country_code,),
+        )
+        new_row = cur.fetchone()
+        assert new_row is not None
+        new_id: int = int(new_row[0])
+        cur.close()
+        return new_id
+
+    def ensure_aircraft(self, ac: Dict[str, Any]) -> int:
+        """
+        Приходит в конструкции с такими ключами: dict из OpenSkyAircraftClient:
+        {
+            "icao24": ...,
+            "callsign": ...,
+            "country": ...,
+            "latitude": ...,
+            "longitude": ...,
+            "altitude": ...,
+            "velocity": ...,
+            "on_ground": ...
+        }
+        """
+        cur = self.conn.cursor()
+        cur.execute("SELECT aircraft_id FROM aircraft WHERE icao24 = %s;", (ac["icao24"],))
+        row = cur.fetchone()
+        if row is not None:
+            aircraft_id: int = int(row[0])
+            cur.execute(
+                """
+                UPDATE aircraft
+                SET callsign = %s,
+                    latitude = %s,
+                    longitude = %s,
+                    altitude = %s,
+                    velocity = %s,
+                    on_ground = %s
+                WHERE aircraft_id = %s;
+                """,
+                (
+                    ac["callsign"],
+                    ac["latitude"],
+                    ac["longitude"],
+                    ac["altitude"],
+                    ac["velocity"],
+                    ac["on_ground"],
+                    aircraft_id,
+                ),
+            )
+            cur.close()
+            return aircraft_id
+
+        country_id = self.ensure_aircraft_country(ac["country"])
+        cur.execute(
+            """
+            INSERT INTO aircraft (
+                icao24, callsign, latitude, longitude,
+                altitude, velocity, on_ground, country_id
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING aircraft_id;
+            """,
+            (
+                ac["icao24"],
+                ac["callsign"],
+                ac["latitude"],
+                ac["longitude"],
+                ac["altitude"],
+                ac["velocity"],
+                ac["on_ground"],
+                country_id,
+            ),
+        )
+        new_row = cur.fetchone()
+        assert new_row is not None
+        aircraft_id = int(new_row[0])
+        cur.close()
+        return aircraft_id
+
+    def insert_observation(self, aircraft_id: int, country_id: int) -> None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO flight_observations (aircraft_id, country_id)
+            VALUES (%s, %s);
+            """,
+            (aircraft_id, country_id),
+        )
+        cur.close()
+
+    # ---------- МЕТОДЫ ЗАПРОСОВ К БД ----------
+
+    def get_info_countries_and_planes(self) -> List[Dict[str, Any]]:
+        query = """
+            SELECT
+                c.country_name,
+                COUNT(fo.aircraft_id) AS plane_count
+            FROM countries c
+            LEFT JOIN flight_observations fo ON c.country_id = fo.country_id
+            GROUP BY c.country_id, c.country_name
+            ORDER BY c.country_name;
+        """
+        cur = self.conn.cursor()
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+        return [{"country_name": r[0], "plane_count": r[1]} for r in rows]
+
+    def get_all_planes(self) -> List[Dict[str, Any]]:
+        query = """
+            SELECT
+                a.icao24,
+                ac.country_code,
+                a.velocity,
+                a.altitude
+            FROM aircraft a
+            LEFT JOIN aircraft_countries ac ON a.country_id = ac.country_id
+            ORDER BY a.icao24;
+        """
+        cur = self.conn.cursor()
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+        return [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
+
+    def get_avg_height(self) -> float:
+        cur = self.conn.cursor()
+        cur.execute("SELECT AVG(altitude) FROM aircraft;")
+        row = cur.fetchone()
+        cur.close()
+        avg = row[0] if row is not None else None
+        return float(avg) if avg is not None else 0.0
+
+    def get_max_height(self) -> List[Dict[str, Any]]:
+        avg = self.get_avg_height()
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT icao24 , country_id, velocity, altitude FROM aircraft WHERE altitude > %s;",
+            (avg,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [{"icao24": r[0], "country_id": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
+
+    def get_planes_by_countries(self, country_names: List[str]) -> List[Dict[str, Any]]:
+        if not country_names:
+            return []
+        placeholders = ",".join(["%s"] * len(country_names))
+        query = f"""
+            SELECT
+                a.icao24,
+                ac.country_code,
+                a.velocity,
+                a.altitude
+            FROM aircraft a
+            JOIN aircraft_countries ac ON a.country_id = ac.country_id
+            WHERE ac.country_code IN ({placeholders})
+            ORDER BY ac.country_code, a.aircraft_id;
+        """
+        cur = self.conn.cursor()
+        cur.execute(query, tuple(country_names))
+        rows = cur.fetchall()
+        cur.close()
+        return [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
+
+    def close(self) -> None:
+        if self.conn:
+            self.conn.close()

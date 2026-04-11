@@ -148,6 +148,7 @@ class DBManager:
     # ---------- МЕТОДЫ ЗАПРОСОВ К БД ----------
 
     def get_info_countries_and_planes(self) -> List[Dict[str, Any]]:
+        """Получает список всех стран и количество самолётов в каждой стране."""
         query = """
             SELECT
                 c.country_name,
@@ -164,6 +165,13 @@ class DBManager:
         return [{"country_name": r[0], "plane_count": r[1]} for r in rows]
 
     def get_all_planes(self) -> List[Dict[str, Any]]:
+        """
+        Запрос в базу на получение списка всех самолётов с указанием
+        страны регистрации,
+        номера самолёта,
+        скорость полёта и
+        высота полёта.
+        """
         query = """
             SELECT
                 a.icao24,
@@ -181,6 +189,7 @@ class DBManager:
         return [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
 
     def get_avg_height(self) -> float:
+        """Запрос в базу на получение списка средней высоты полёта всех самолётов."""
         cur = self.conn.cursor()
         cur.execute("SELECT AVG(altitude) FROM aircraft;")
         row = cur.fetchone()
@@ -189,6 +198,7 @@ class DBManager:
         return float(avg) if avg is not None else 0.0
 
     def get_max_height(self) -> List[Dict[str, Any]]:
+        """Запрос в базу на получение список всех самолётов, у которых высота полёта выше средней."""
         avg = self.get_avg_height()
         cur = self.conn.cursor()
         cur.execute(
@@ -199,10 +209,15 @@ class DBManager:
         cur.close()
         return [{"icao24": r[0], "country_id": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
 
-    def get_planes_by_countries(self, country_names: List[str]) -> List[Dict[str, Any]]:
-        if not country_names:
+    def get_planes_by_countries(self, reg_countries: List[str]) -> List[Dict[str, Any]]:
+        """
+        Запрос в базу на получение списка всех самолётов, зарегистрированных
+        в странах названии которых взяты в работу.
+        """
+        if not reg_countries:
             return []
-        placeholders = ",".join(["%s"] * len(country_names))
+
+        placeholders = ",".join(["%s"] * len(reg_countries))
         query = f"""
             SELECT
                 a.icao24,
@@ -212,13 +227,15 @@ class DBManager:
             FROM aircraft a
             JOIN aircraft_countries ac ON a.country_id = ac.country_id
             WHERE ac.country_code IN ({placeholders})
-            ORDER BY ac.country_code, a.aircraft_id;
+            ORDER BY ac.country_code, a.icao24;
         """
         cur = self.conn.cursor()
-        cur.execute(query, tuple(country_names))
+        cur.execute(query, tuple(reg_countries))
         rows = cur.fetchall()
         cur.close()
-        return [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
+        result = [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
+
+        return result
 
     def close(self) -> None:
         if self.conn:

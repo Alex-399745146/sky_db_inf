@@ -45,7 +45,7 @@ class NominatimGeocoder(BaseGeocoder):
         Запрашивает у Nominatim границы страны и возвращает как dict.
         """
         url = "https://nominatim.openstreetmap.org/search"
-        params: Dict[str, ParamsValue] = {
+        params: dict[str, Any] = {
             "country": country_name,
             "format": "json",
             "polygon_geojson": 0,  # не нужен geojson

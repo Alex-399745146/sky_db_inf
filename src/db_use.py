@@ -39,7 +39,9 @@ class DBManager:
             (country_name,),
         )
         new_row = cur.fetchone()
-        assert new_row is not None
+        if new_row is None:
+            cur.close()
+            raise Exception(f"Не удалось вставить страну: из БД не получен идентификатор страны {country_name}")
         new_id: int = int(new_row[0])
         cur.close()
         return new_id

@@ -18,13 +18,9 @@ class SkyDataAdapter:
     Воспроизводит логику старого APIAdapter, но использует отдельные клиенты.
     """
 
-    def __init__(self, config_path: str = "config/config.ini") -> None:
-        """
-        Args:
-            config_path (str): путь к INI‑конфигу.
-        """
-        self.geocoder = NominatimGeocoder(config_path)
-        self.sky_client = OpenSkyAircraftClient(username="User-Agent", password="test-app/1.0")
+    def __init__(self) -> None:
+        self.geocoder = NominatimGeocoder()
+        self.sky_client = OpenSkyAircraftClient()
         self._aeroplanes: Optional[List[Dict[str, Any]]] = None
 
     @property

@@ -1,61 +1,77 @@
 # src/sky_api.py
-"""
-Клиент API самолётов из OpenSky
-"""
+"""Клиент OpenSky Network API."""
 
-from abc import ABC, abstractmethod
-from configparser import ConfigParser
-from typing import Dict, List
+import os
+import time
+from typing import Dict, List, Optional
 
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 
-class BaseAircraftClient(ABC):
-    """
-    Абстрактный клиент для получения данных о самолётах в заданной области.
-    Определяет интерфейс: get_aircraft_in_area(bounds: dict) -> List[Dict].
-    """
+TOKEN_URL = (
+    "https://auth.opensky-network.org/auth/realms/opensky-network/"
+    "protocol/openid-connect/token"
+)
 
-    @abstractmethod
-    def get_aircraft_in_area(self, bounds: dict) -> List[Dict]:
-        """
-        Возвращает список самолётов в прямоугольной области (bounding box).
+class OpenSkyAircraftClient:
+    """Получает данные о самолётах из OpenSky."""
 
-        Args:
-            bounds (dict): границы области (min_lat, max_lat, min_lon, max_lon).
-
-        Returns:
-            List[Dict]: список словарей с данными о самолётах.
-        """
-        raise NotImplementedError
-
-
-class OpenSkyAircraftClient(BaseAircraftClient):
-    """
-    Клиент для OpenSky Network API (https://opensky-network.org).
-    Работает по координатам области (geo_box) и возвращает состояние самолётов.
-    """
-
-    def __init__(self, username: str, password: str):
-        """
-        Args:
-            username (str): учётная запись OpenSky.
-            password (str): пароль.
-        """
+    def __init__(
+        self,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+    ) -> None:
         self.base_url = "https://opensky-network.org/api/states/all"
-        self.auth = (username, password)
+
+        self.client_id = client_id or os.getenv("OPENSKY_CLIENT_ID") or None
+        self.client_secret = (
+            client_secret or os.getenv("OPENSKY_CLIENT_SECRET") or None
+        )
+
+        if bool(self.client_id) != bool(self.client_secret):
+            raise ValueError(
+                "Для OpenSky нужно задать обе переменные: "
+                "OPENSKY_CLIENT_ID и OPENSKY_CLIENT_SECRET."
+            )
+
+        self.session = requests.Session()
+        self._access_token: Optional[str] = None
+        self._token_expires_at = 0.0
+
+    def _get_access_token(self) -> Optional[str]:
+        """Возвращает действующий OAuth2-токен или None для анонимного запроса."""
+        if not self.client_id or not self.client_secret:
+            return None
+
+        if (
+            self._access_token
+            and time.monotonic() < self._token_expires_at
+        ):
+            return self._access_token
+
+        response = self.session.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+        response.raise_for_status()
+
+        token_data = response.json()
+        self._access_token = token_data["access_token"]
+        expires_in = int(token_data.get("expires_in", 1800))
+        self._token_expires_at = time.monotonic() + max(expires_in - 30, 0)
+
+        return self._access_token
 
     def get_aircraft_in_area(self, bounds: dict) -> List[Dict]:
-        """
-        Запрашивает самолёты в прямоугольной области.
-
-        Args:
-            bounds (dict): словарь с ключами:
-                           min_lat, max_lat, min_lon, max_lon.
-
-        Returns:
-            List[Dict]: список самолётов (каждый самолёт — dict).
-        """
+        """Возвращает самолёты в заданной области."""
         params = {
             "lamin": bounds["min_lat"],
             "lamax": bounds["max_lat"],
@@ -63,18 +79,29 @@ class OpenSkyAircraftClient(BaseAircraftClient):
             "lomax": bounds["max_lon"],
         }
 
-        response = requests.get(self.base_url, auth=self.auth, params=params)
+        headers = {}
+        token = self._get_access_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        response = self.session.get(
+            self.base_url,
+            params=params,
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
         result_data = response.json()
 
-        # Проверяем поле "states" JSON ответа, если None то ответ пуст возвращаем [].
-        if not result_data.get("states"):
+        if not result_data or not result_data.get("states"):
             return []
 
-        # Сырой формат от OpenSky форматирует в удобный для дальнейшей работы вид.
         aircraft_list = []
+
         for state in result_data["states"]:
             if state is None:
                 continue
+
             aircraft_list.append(
                 {
                     "icao24": state[0],
@@ -89,55 +116,3 @@ class OpenSkyAircraftClient(BaseAircraftClient):
             )
 
         return aircraft_list
-
-
-if __name__ == "__main__":
-    import os
-
-    # Путь к проекту: sky_db_inf.
-    main_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # Путь к конфигам ини проекта.
-    config_path = os.path.join(main_root, "config", "config.ini")
-    print("\nПуть к конфигурациям -", config_path)
-
-    # Читаем конфиги.
-    config = ConfigParser()
-    config.read(config_path)
-
-    # Проверка, что секция app и countries существуют в конфигах ини.
-    countries_str = config.get("app", "countries")
-    countries = [c.strip() for c in countries_str.split(",") if c.strip()]
-
-    print("\nСтраны для проверки в конфигах:", type(countries), countries)
-
-    # Учётные данные OpenSky (временно прописываем; можно потом вынести в config.ini).
-    opensky_user = "User-Agent"
-    opensky_pass = "test-app/1.0"
-
-    # Пример geo_box (Россия или какая‑то область).
-    test_bounds = {
-        "min_lat": 41.18,
-        "max_lat": 82.05,
-        "min_lon": -180.0,
-        "max_lon": 180.0,
-    }
-
-    # Проверка клиента OpenSky.
-    client = OpenSkyAircraftClient(username=opensky_user, password=opensky_pass)
-    print("Запрашиваю воздушное судно в этом районе:", test_bounds)
-
-    # Выводим кол-во обнаруженных самолётов в указанном geo_box.
-    aircraft_list = client.get_aircraft_in_area(test_bounds)
-    print(f"Нашел {len(aircraft_list)} воздушное судно.")
-
-    # Выведем первые 3 самолёта для проверки структуры.
-    for i, ac in enumerate(aircraft_list[:3]):
-        print(f"\nСамолёт {i + 1}:")
-        print(f"  icao24:      {ac['icao24']}")
-        print(f"  callsign:    {ac['callsign']}")
-        print(f"  country:     {ac['country']}")
-        print(f"  latitude:    {ac['latitude']}")
-        print(f"  longitude:   {ac['longitude']}")
-        print(f"  altitude:    {ac['altitude']}")
-        print(f"  velocity:    {ac['velocity']}")
-        print(f"  on_ground:   {ac['on_ground']}")

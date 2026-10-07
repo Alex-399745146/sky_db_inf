@@ -4,13 +4,16 @@
 Так он остаётся автономным.
 """
 
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from abc import ABC, abstractmethod
-from configparser import ConfigParser  # пока не используется, но пусть будет
-from typing import Any, Dict, Union
+from typing import Any, Dict
 
 import requests
-
-ParamsValue = Union[str, int, float]
 
 
 class BaseGeocoder(ABC):
@@ -30,34 +33,34 @@ class BaseGeocoder(ABC):
 
 class NominatimGeocoder(BaseGeocoder):
     """
-    Реализация геокодера через Nominatim (nominatim.openstreetmap.org).
-    Читает список стран из config.ini, но метод get_country_bounds
-    работает автономно (принимает строку с названием страны).
+    Геокодер Nominatim: получает границы страны по переданному названию.
+    Список стран задаётся вне класса, например через APP_COUNTRIES.
     """
 
-    def __init__(self, config_path: str = "config/config.ini") -> None:
-        self.config_path = config_path
+    def __init__(self) -> None:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "KURSOVAYA_3/1.0"})
 
     def get_country_bounds(self, country_name: str) -> Dict[str, float]:
-        """
-        Запрашивает у Nominatim границы страны и возвращает как dict.
-        """
+        """Запрашивает у Nominatim границы страны и возвращает их словарём."""
         url = "https://nominatim.openstreetmap.org/search"
         params: dict[str, Any] = {
             "country": country_name,
             "format": "json",
-            "polygon_geojson": 0,  # не нужен geojson
+            "polygon_geojson": 0,
         }
 
-        response = self.session.get(url, params=params)
+        response = self.session.get(url, params=params, timeout=30)
+        response.raise_for_status()
         result_data: Any = response.json()
 
         if not result_data:
-            raise ValueError(f"Country '{country_name}' not found in Nominatim.")
+            raise ValueError(f"Страна «{country_name}» не найдена.")
 
-        geo_box = result_data[0]["boundingbox"]
+        geo_box = result_data[0].get("boundingbox")
+        if not geo_box or len(geo_box) != 4:
+            raise ValueError(f"Nominatim не вернул границы для страны «{country_name}».")
+
         return {
             "min_lat": float(geo_box[0]),
             "max_lat": float(geo_box[1]),
@@ -67,29 +70,20 @@ class NominatimGeocoder(BaseGeocoder):
 
 
 if __name__ == "__main__":
-    import os
+    countries_str = os.getenv("APP_COUNTRIES", "")
+    countries = [country.strip() for country in countries_str.split(",") if country.strip()]
 
-    # Путь к проекту: sky_db_inf.
-    main_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # Путь к конфигам ини проекта.
-    config_path = os.path.join(main_root, "config", "config.ini")
-    print("\nПуть к конфигурациям -", config_path)
+    if not countries:
+        raise RuntimeError(
+            "Переменная APP_COUNTRIES не задана. Проверьте локальный .env."
+        )
 
-    # Читаем конфиги.
-    config = ConfigParser()
-    config.read(config_path)
+    print("Страны для проверки:", countries)
 
-    # Проверка, что секция app и countries существуют в конфигах ини.
-    countries_str = config.get("app", "countries")
-    countries = [c.strip() for c in countries_str.split(",") if c.strip()]
-
-    print("\nСтраны для проверки в конфигах:", type(countries), countries)
-
-    # Проверка API и геокодера.
-    geocoder = NominatimGeocoder(config_path)
+    geocoder = NominatimGeocoder()
 
     for country in countries:
         bounds = geocoder.get_country_bounds(country)
-        print(f"\n{country} координаты границы боксов:")
+        print(f"\n{country} — границы:")
         print(f"  min_lat: {bounds['min_lat']:.4f} - max_lat: {bounds['max_lat']:.4f}")
         print(f"  min_lon: {bounds['min_lon']:.4f} - max_lon: {bounds['max_lon']:.4f}")

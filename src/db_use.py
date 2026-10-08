@@ -223,13 +223,30 @@ class DBManager:
 
     def get_planes_by_countries(self, reg_countries: List[str]) -> List[Dict[str, Any]]:
         """
-        Запрос в базу на получение списка всех самолётов, зарегистрированных
-        в странах названии которых взяты в работу.
+        Возвращает самолёты, зарегистрированные в выбранных странах.
+        Учитывает варианты названия Russia / Russian Federation.
         """
-        if not reg_countries:
+        aliases = {
+            "russia": "russian federation",
+            "russian federation": "russia",
+        }
+
+        country_names = set()
+        for country in reg_countries:
+            normalized = country.strip().casefold()
+            if not normalized:
+                continue
+
+            country_names.add(normalized)
+            alias = aliases.get(normalized)
+            if alias:
+                country_names.add(alias)
+
+        if not country_names:
             return []
 
-        placeholders = ",".join(["%s"] * len(reg_countries))
+        countries = sorted(country_names)
+        placeholders = ",".join(["%s"] * len(countries))
         query = f"""
             SELECT
                 a.icao24,
@@ -238,16 +255,24 @@ class DBManager:
                 a.altitude
             FROM aircraft a
             JOIN aircraft_countries ac ON a.country_id = ac.country_id
-            WHERE ac.country_code IN ({placeholders})
+            WHERE lower(trim(ac.country_code)) IN ({placeholders})
             ORDER BY ac.country_code, a.icao24;
         """
+
         cur = self.conn.cursor()
-        cur.execute(query, tuple(reg_countries))
+        cur.execute(query, tuple(countries))
         rows = cur.fetchall()
         cur.close()
-        result = [{"icao24": r[0], "country_code": r[1], "velocity": r[2], "altitude": r[3]} for r in rows]
 
-        return result
+        return [
+            {
+                "icao24": row[0],
+                "country_code": row[1],
+                "velocity": row[2],
+                "altitude": row[3],
+            }
+            for row in rows
+        ]
 
     def close(self) -> None:
         if self.conn:

@@ -134,8 +134,6 @@ def print_planes_by_countries(db: DBManager, countries: list) -> None:
     table = PrettyTable(["icao24", "Страна рег.", "Скорость", "Высота"])
     for row in data:
         table.add_row([row["icao24"], row["country_code"], row["velocity"], row["altitude"]])
-    print("""\nВНИМАНИЕ результативность зависит от правильности написания страны
-Russian Federation-> даст результат, Russia-> покажет 0""")
     print("Самолёты с домашней регистрацией:")
     print(table)
 

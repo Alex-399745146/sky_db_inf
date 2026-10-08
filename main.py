@@ -190,7 +190,11 @@ def main() -> None:
 
             for aircraft in adapter.aeroplanes:
                 aircraft_id = db.ensure_aircraft(aircraft)
-                db.insert_observation(aircraft_id, country_id)
+                db.insert_observation(
+                    aircraft_id,
+                    country_id,
+                    aircraft["position_time"],
+                )
 
         print_countries_and_planes(db)
         print_all_planes(db)

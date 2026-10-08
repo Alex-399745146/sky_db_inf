@@ -105,6 +105,7 @@ class OpenSkyAircraftClient:
             aircraft_list.append(
                 {
                     "icao24": state[0],
+                    "position_time": state[3],
                     "callsign": state[1].strip() if state[1] else None,
                     "country": state[2].strip() if state[2] else None,
                     "latitude": state[6],

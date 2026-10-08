@@ -136,14 +136,24 @@ class DBManager:
         cur.close()
         return aircraft_id
 
-    def insert_observation(self, aircraft_id: int, country_id: int) -> None:
+    def insert_observation(
+        self,
+        aircraft_id: int,
+        country_id: int,
+        position_time: Optional[int],
+    ) -> None:
+        if position_time is None:
+            return
+
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT INTO flight_observations (aircraft_id, country_id)
-            VALUES (%s, %s);
+            INSERT INTO flight_observations
+                (aircraft_id, country_id, position_time)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (aircraft_id, position_time) DO NOTHING;
             """,
-            (aircraft_id, country_id),
+            (aircraft_id, country_id, position_time),
         )
         cur.close()
 

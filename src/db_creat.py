@@ -102,8 +102,20 @@ def create_tables_db(
                         REFERENCES aircraft(aircraft_id),
                     country_id INTEGER
                         REFERENCES countries(country_id),
-                    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    position_time BIGINT
                 );
+            """)
+
+            cur.execute("""
+                ALTER TABLE flight_observations
+                ADD COLUMN IF NOT EXISTS position_time BIGINT;
+            """)
+
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    uq_flight_observations_aircraft_position_time
+                ON flight_observations (aircraft_id, position_time);
             """)
 
         print("Таблицы созданы.")
